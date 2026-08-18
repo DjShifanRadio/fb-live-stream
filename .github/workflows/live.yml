@@ -1,0 +1,68 @@
+name: Facebook Live Stream
+
+on:
+  workflow_dispatch:
+    inputs:
+      stream_key:
+        description: 'Facebook Stream Key-ஐ இங்கே ஒட்டவும் (Paste Stream Key Here)'
+        required: true
+        default: ''
+      custom_bg_url:
+        description: 'Custom Image URL (விருப்பப்பட்டால் புதிய படம் URL இடலாம்)'
+        required: false
+        default: ''
+
+jobs:
+  stream:
+    runs-on: ubuntu-latest
+    timeout-minutes: 130
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Install FFmpeg & Curl
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg curl
+
+    - name: Download Background Image
+      env:
+        DEFAULT_URL: "https://res.cloudinary.com/dvo4hhx7j/image/upload/v1786469584/Listner_qafwzi.jpg.jpg"
+        INPUT_URL: ${{ github.event.inputs.custom_bg_url }}
+      run: |
+        IMAGE_URL="${INPUT_URL:-$DEFAULT_URL}"
+        echo "Downloading background image from: $IMAGE_URL"
+        curl -f -s -L "$IMAGE_URL" -o background.jpg || exit 1
+        ls -lh background.jpg
+
+    - name: Start Live Stream with Continuous Auto-Restart
+      env:
+        STREAM_URL: "https://stream-159.zeno.fm/dsdb1twe8ueuv"
+        LIVE_KEY: ${{ github.event.inputs.stream_key }}
+      run: |
+        if [ -z "$LIVE_KEY" ]; then
+          echo "Error: Stream Key வழங்கப்படவில்லை!"
+          exit 1
+        fi
+
+        echo "🚀 Starting Endless Live Stream Loop..."
+        
+        # நேரலை துண்டிக்கப்பட்டால் தானாகவே மீண்டும் மீண்டும் முயற்சிக்கும் சுழற்சி (Loop)
+        while true; do
+          echo "🎥 FFmpeg நேரலையைத் தொடங்குகிறது..."
+          
+          ffmpeg -re -fflags +genpts+nobuffer+discardcorrupt -flags low_delay \
+          -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 1 \
+          -probesize 32 -analyzeduration 0 \
+          -thread_queue_size 512 -i "$STREAM_URL" \
+          -loop 1 -i background.jpg \
+          -map 1:v:0 -map 0:a:0 \
+          -vf "scale=854:480" \
+          -c:v libx264 -preset ultrafast -tune zerolatency -pix_fmt yuv420p -r 30 -g 60 -b:v 400k -maxrate 500k -bufsize 100k \
+          -c:a aac -b:a 256k -ar 44100 -ac 2 -af "aresample=async=1:min_hard_comp=0.100000" \
+          -f flv "rtmps://live-api-s.facebook.com:443/rtmp/$LIVE_KEY"
+
+          echo "⚠️ ஸ்ட்ரீம் துண்டிக்கப்பட்டது! 5 வினாடிகளில் மீண்டும் இணைக்கப்படுகிறது..."
+          sleep 5
+        done
